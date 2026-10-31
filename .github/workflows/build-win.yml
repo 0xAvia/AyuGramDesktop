@@ -1,0 +1,369 @@
+name: Windows build
+
+# Personal Windows x64 build of this fork.
+# Based on Telegram Desktop's .github/workflows/win.yml.
+#
+# Needs two repository secrets (Settings > Secrets and variables > Actions):
+#   TG_API_ID    your api_id from https://my.telegram.org
+#   TG_API_HASH  your api_hash from https://my.telegram.org
+#
+# Dependencies (Qt, ffmpeg, webrtc, ...) are built in their own job and cached.
+# The first run can take most of a day of runner time. If the dependencies job
+# runs out of time, just re-run the workflow: it resumes from what was cached.
+
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: Build configuration
+        type: choice
+        options: [Release, Debug]
+        default: Release
+  push:
+    branches: [haru]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'changelog.txt'
+      - 'LEGAL'
+      - 'LICENSE'
+      - 'snap/**'
+      - 'Telegram/build/docker/**'
+      - 'Telegram/SourceFiles/platform/linux/**'
+      - 'Telegram/SourceFiles/platform/mac/**'
+      - 'Telegram/Telegram/**'
+      - 'Telegram/configure.sh'
+      - 'Telegram/Telegram.plist'
+
+concurrency:
+  group: build-win-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CONFIG: ${{ inputs.config || 'Debug' }}
+  QT: qt6
+  PREPARE_PATH: Telegram/build/prepare/prepare.py
+
+jobs:
+
+  dependencies:
+    name: Dependencies
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Check API credentials.
+        shell: bash
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          if [ -z "$TG_API_ID" ] || [ -z "$TG_API_HASH" ]; then
+            echo "::error::Add TG_API_ID and TG_API_HASH repository secrets first (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+
+      - name: Prepare directories.
+        run: |
+          mkdir %userprofile%\TBuild\Libraries
+          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries\win64>>%GITHUB_ENV%
+
+      - name: Get repository name.
+        shell: bash
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone.
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: First set up.
+        shell: bash
+        run: |
+          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win.md
+          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          echo "SDK=$SDK" >> $GITHUB_ENV
+
+          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+
+          echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
+          echo "$SDK" >> CACHE_KEY.txt
+          echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
+
+          if [ "$CONFIG" == "Debug" ]; then
+            echo "PREPARE_ARGS=skip-release silent $QT" >> $GITHUB_ENV
+          else
+            echo "PREPARE_ARGS=silent $QT" >> $GITHUB_ENV
+          fi
+
+          git config --global user.email "you@example.com"
+          git config --global user.name "Sample"
+
+      - uses: Eden-CI/msvc-dev-cmd@master
+        name: Native Tools Command Prompt.
+        with:
+          arch: x64
+          sdk: ${{ env.SDK }}
+          toolset: '14.44'
+
+      - name: NuGet sources.
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      # Keys get a per-run suffix because a cache entry can't be overwritten,
+      # and a partial build from a timed out run must still be resumable.
+      - name: Restore ThirdParty cache.
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: win64-third-party-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            win64-third-party-${{ env.CACHE_KEY }}-
+            win64-third-party-
+
+      - name: Restore Libraries cache.
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: win64-libs-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            win64-libs-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-
+            win64-libs-${{ env.CONFIG }}-
+
+      - name: Restore Qt cache.
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: win64-${{ env.QT }}-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            win64-${{ env.QT }}-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-
+            win64-${{ env.QT }}-${{ env.CONFIG }}-
+
+      - name: Fingerprint restored libraries.
+        shell: bash
+        run: |
+          KEYS="$LibrariesPath/cache_keys"
+          if [ -d "$KEYS" ]; then
+            FP="$(find "$KEYS" -type f -exec sha256sum {} + | sort | sha256sum | awk '{ print $1 }')"
+          else
+            FP="none"
+          fi
+          echo "LIBS_BEFORE=$FP" >> $GITHUB_ENV
+
+      # Leaves time in the job to save whatever got built if this runs long.
+      - name: Libraries.
+        id: libraries
+        timeout-minutes: 310
+        run: |
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat %PREPARE_ARGS%
+
+      - name: Free up some disk space.
+        if: always()
+        shell: bash
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
+
+      - name: Check what changed.
+        if: always()
+        shell: bash
+        run: |
+          KEYS="$LibrariesPath/cache_keys"
+          if [ -d "$KEYS" ]; then
+            FP="$(find "$KEYS" -type f -exec sha256sum {} + | sort | sha256sum | awk '{ print $1 }')"
+          else
+            FP="none"
+          fi
+          if [ "$FP" != "$LIBS_BEFORE" ] && [ "$FP" != "none" ]; then
+            echo "SAVE_CACHE=true" >> $GITHUB_ENV
+            echo "New libraries were built, saving caches."
+          else
+            echo "SAVE_CACHE=false" >> $GITHUB_ENV
+            echo "Nothing new, keeping existing caches."
+          fi
+
+      - name: Save ThirdParty cache.
+        if: always() && env.SAVE_CACHE == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: win64-third-party-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save Libraries cache.
+        if: always() && env.SAVE_CACHE == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: win64-libs-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save Qt cache.
+        if: always() && env.SAVE_CACHE == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: win64-${{ env.QT }}-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Report timeout.
+        if: failure() && steps.libraries.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Dependencies didn't finish in this run. Whatever got built was cached, re-run the workflow to continue."
+
+  build:
+    name: AyuGram x64
+    needs: dependencies
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Prepare directories.
+        run: |
+          mkdir %userprofile%\TBuild\Libraries
+          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries\win64>>%GITHUB_ENV%
+
+      - name: Get repository name.
+        shell: bash
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone.
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: First set up.
+        shell: bash
+        run: |
+          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win.md
+          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          echo "SDK=$SDK" >> $GITHUB_ENV
+
+          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+
+          echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
+          echo "$SDK" >> CACHE_KEY.txt
+          echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
+
+          if [ "$CONFIG" == "Debug" ]; then
+            echo "PREPARE_ARGS=skip-release silent $QT" >> $GITHUB_ENV
+          else
+            echo "PREPARE_ARGS=silent $QT" >> $GITHUB_ENV
+          fi
+
+          echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+          git config --global user.email "you@example.com"
+          git config --global user.name "Sample"
+
+      - uses: Eden-CI/msvc-dev-cmd@master
+        name: Native Tools Command Prompt.
+        with:
+          arch: x64
+          sdk: ${{ env.SDK }}
+          toolset: '14.44'
+
+      - name: NuGet sources.
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: Restore ThirdParty cache.
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: win64-third-party-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            win64-third-party-${{ env.CACHE_KEY }}-
+          fail-on-cache-miss: true
+
+      - name: Restore Libraries cache.
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: win64-libs-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            win64-libs-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-
+          fail-on-cache-miss: true
+
+      - name: Restore Qt cache.
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: win64-${{ env.QT }}-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            win64-${{ env.QT }}-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-
+          fail-on-cache-miss: true
+
+      # Everything is cached at this point, so this only verifies and skips.
+      - name: Libraries.
+        timeout-minutes: 30
+        run: |
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat %PREPARE_ARGS%
+
+      - name: AyuGram build.
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          cd %TBUILD%\%REPO_NAME%\Telegram
+
+          call configure.bat ^
+          x64 ^
+          %QT% ^
+          -D TDESKTOP_API_ID=%TG_API_ID% ^
+          -D TDESKTOP_API_HASH=%TG_API_HASH% ^
+          -D CMAKE_CONFIGURATION_TYPES=%CONFIG% ^
+          -D CMAKE_COMPILE_WARNING_AS_ERROR=OFF ^
+          -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
+          -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
+          if %errorlevel% neq 0 exit /b %errorlevel%
+
+          cmake --build ..\out --config %CONFIG% --parallel
+
+      - name: Collect artifact.
+        run: |
+          set OUT=%TBUILD%\%REPO_NAME%\out\%CONFIG%
+          mkdir artifact
+          move %OUT%\AyuGram.exe artifact\
+          if exist %OUT%\modules xcopy /e /i /y %OUT%\modules artifact\modules
+
+      - uses: actions/upload-artifact@v7
+        name: Upload artifact.
+        with:
+          name: AyuGram-x64-${{ env.CONFIG }}-${{ env.SHORT_SHA }}
+          path: artifact\
+          retention-days: 14
