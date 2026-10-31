@@ -40,8 +40,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CONFIG: ${{ inputs.config || 'Debug' }}
-  QT: qt6
+  BUILD_CONFIG: ${{ inputs.config || 'Debug' }}
+  QT_ARG: qt6
   PREPARE_PATH: Telegram/build/prepare/prepare.py
 
 jobs:
@@ -97,10 +97,10 @@ jobs:
           echo "$SDK" >> CACHE_KEY.txt
           echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
 
-          if [ "$CONFIG" == "Debug" ]; then
-            echo "PREPARE_ARGS=skip-release silent $QT" >> $GITHUB_ENV
+          if [ "$BUILD_CONFIG" == "Debug" ]; then
+            echo "PREPARE_ARGS=skip-release silent $QT_ARG" >> $GITHUB_ENV
           else
-            echo "PREPARE_ARGS=silent $QT" >> $GITHUB_ENV
+            echo "PREPARE_ARGS=silent $QT_ARG" >> $GITHUB_ENV
           fi
 
           git config --global user.email "you@example.com"
@@ -138,10 +138,10 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: win64-libs-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: win64-libs-${{ env.BUILD_CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            win64-libs-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-
-            win64-libs-${{ env.CONFIG }}-
+            win64-libs-${{ env.BUILD_CONFIG }}-${{ env.CACHE_KEY }}-
+            win64-libs-${{ env.BUILD_CONFIG }}-
 
       - name: Restore Qt cache.
         uses: actions/cache/restore@v6
@@ -149,10 +149,10 @@ jobs:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: win64-${{ env.QT }}-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: win64-${{ env.QT_ARG }}-${{ env.BUILD_CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            win64-${{ env.QT }}-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-
-            win64-${{ env.QT }}-${{ env.CONFIG }}-
+            win64-${{ env.QT_ARG }}-${{ env.BUILD_CONFIG }}-${{ env.CACHE_KEY }}-
+            win64-${{ env.QT_ARG }}-${{ env.BUILD_CONFIG }}-
 
       - name: Fingerprint restored dependencies.
         shell: bash
@@ -202,7 +202,7 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: win64-libs-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: win64-libs-${{ env.BUILD_CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Save Qt cache.
         if: always() && env.SAVE_CACHE == 'true'
@@ -211,7 +211,7 @@ jobs:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: win64-${{ env.QT }}-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: win64-${{ env.QT_ARG }}-${{ env.BUILD_CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Report failure.
         if: failure() && steps.libraries.outcome == 'failure'
@@ -260,10 +260,10 @@ jobs:
           echo "$SDK" >> CACHE_KEY.txt
           echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
 
-          if [ "$CONFIG" == "Debug" ]; then
-            echo "PREPARE_ARGS=skip-release silent $QT" >> $GITHUB_ENV
+          if [ "$BUILD_CONFIG" == "Debug" ]; then
+            echo "PREPARE_ARGS=skip-release silent $QT_ARG" >> $GITHUB_ENV
           else
-            echo "PREPARE_ARGS=silent $QT" >> $GITHUB_ENV
+            echo "PREPARE_ARGS=silent $QT_ARG" >> $GITHUB_ENV
           fi
 
           echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
@@ -301,9 +301,9 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: win64-libs-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: win64-libs-${{ env.BUILD_CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            win64-libs-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-
+            win64-libs-${{ env.BUILD_CONFIG }}-${{ env.CACHE_KEY }}-
           fail-on-cache-miss: true
 
       - name: Restore Qt cache.
@@ -312,9 +312,9 @@ jobs:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: win64-${{ env.QT }}-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: win64-${{ env.QT_ARG }}-${{ env.BUILD_CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            win64-${{ env.QT }}-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-
+            win64-${{ env.QT_ARG }}-${{ env.BUILD_CONFIG }}-${{ env.CACHE_KEY }}-
           fail-on-cache-miss: true
 
       # Everything is cached at this point, so this only verifies and skips.
@@ -332,21 +332,21 @@ jobs:
 
           call configure.bat ^
           x64 ^
-          %QT% ^
+          %QT_ARG% ^
           -D TDESKTOP_API_ID=%TG_API_ID% ^
           -D TDESKTOP_API_HASH=%TG_API_HASH% ^
-          -D CMAKE_CONFIGURATION_TYPES=%CONFIG% ^
+          -D CMAKE_CONFIGURATION_TYPES=%BUILD_CONFIG% ^
           -D CMAKE_COMPILE_WARNING_AS_ERROR=OFF ^
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
           if %errorlevel% neq 0 exit /b %errorlevel%
 
-          cmake --build ..\out --config %CONFIG% --parallel
+          cmake --build ..\out --config %BUILD_CONFIG% --parallel
 
       - name: Collect artifact.
         run: |
-          set OUT=%TBUILD%\%REPO_NAME%\out\%CONFIG%
+          set OUT=%TBUILD%\%REPO_NAME%\out\%BUILD_CONFIG%
           mkdir artifact
           move %OUT%\AyuGram.exe artifact\
           if exist %OUT%\modules xcopy /e /i /y %OUT%\modules artifact\modules
@@ -354,6 +354,6 @@ jobs:
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         with:
-          name: AyuGram-x64-${{ env.CONFIG }}-${{ env.SHORT_SHA }}
+          name: AyuGram-x64-${{ env.BUILD_CONFIG }}-${{ env.SHORT_SHA }}
           path: artifact\
           retention-days: 14
