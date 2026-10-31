@@ -154,16 +154,11 @@ jobs:
             win64-${{ env.QT }}-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-
             win64-${{ env.QT }}-${{ env.CONFIG }}-
 
-      - name: Fingerprint restored libraries.
+      - name: Fingerprint restored dependencies.
         shell: bash
         run: |
-          KEYS="$LibrariesPath/cache_keys"
-          if [ -d "$KEYS" ]; then
-            FP="$(find "$KEYS" -type f -exec sha256sum {} + | sort | sha256sum | awk '{ print $1 }')"
-          else
-            FP="none"
-          fi
-          echo "LIBS_BEFORE=$FP" >> $GITHUB_ENV
+          FP="$(find "$LibrariesPath/cache_keys" "$TBUILD/ThirdParty/cache_keys" -type f -exec sha256sum {} + 2>/dev/null | sort | sha256sum | awk '{ print $1 }')"
+          echo "DEPS_BEFORE=$FP" >> $GITHUB_ENV
 
       # Leaves time in the job to save whatever got built if this runs long.
       - name: Libraries.
@@ -181,15 +176,10 @@ jobs:
         if: always()
         shell: bash
         run: |
-          KEYS="$LibrariesPath/cache_keys"
-          if [ -d "$KEYS" ]; then
-            FP="$(find "$KEYS" -type f -exec sha256sum {} + | sort | sha256sum | awk '{ print $1 }')"
-          else
-            FP="none"
-          fi
-          if [ "$FP" != "$LIBS_BEFORE" ] && [ "$FP" != "none" ]; then
+          FP="$(find "$LibrariesPath/cache_keys" "$TBUILD/ThirdParty/cache_keys" -type f -exec sha256sum {} + 2>/dev/null | sort | sha256sum | awk '{ print $1 }')"
+          if [ "$FP" != "$DEPS_BEFORE" ]; then
             echo "SAVE_CACHE=true" >> $GITHUB_ENV
-            echo "New libraries were built, saving caches."
+            echo "New dependencies were built, saving caches."
           else
             echo "SAVE_CACHE=false" >> $GITHUB_ENV
             echo "Nothing new, keeping existing caches."
@@ -223,11 +213,11 @@ jobs:
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
           key: win64-${{ env.QT }}-${{ env.CONFIG }}-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Report timeout.
+      - name: Report failure.
         if: failure() && steps.libraries.outcome == 'failure'
         shell: bash
         run: |
-          echo "::warning::Dependencies didn't finish in this run. Whatever got built was cached, re-run the workflow to continue."
+          echo "::warning::Dependencies step failed. If it ran out of time, re-run the workflow to continue from the cache. Otherwise check the Libraries step log."
 
   build:
     name: AyuGram x64
