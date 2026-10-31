@@ -2632,6 +2632,7 @@ if (MSVC)
     target_link_libraries(Telegram
     PRIVATE
         delayimp
+        Dnsapi # Static Qt6Network pulls in qdnslookup_win.cpp.
     )
     target_link_options(Telegram
     PRIVATE
